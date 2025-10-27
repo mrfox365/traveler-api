@@ -108,7 +108,6 @@ public class ConcurrentUpdateTests {
                     // Якщо ми дійшли сюди, @Version не спрацював
                     log.error("User A: ЗБЕРЕЖЕННЯ ВДАЛОСЯ, ЦЕ ПОМИЛКА В ЛОГІЦІ БЛОКУВАННЯ!");
 
-                    // ОНОВЛЕНО: Більш надійний блок catch
                 } catch (ObjectOptimisticLockingFailureException e) { // CПОЧАТКУ ПЕРЕВІРЯЄМО SPRING
                     // ОЧІКУВАНИЙ РЕЗУЛЬТАТ! (Spring wrapper)
                     log.info("User A: Успішно спіймано Spring ObjectOptimisticLockingFailureException, як і очікувалось.");

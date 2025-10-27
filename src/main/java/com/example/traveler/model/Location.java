@@ -16,9 +16,14 @@ import java.util.UUID;
 @Getter
 @Setter
 @Entity
-@Table(name = "locations", indexes = {
-        @Index(name = "idx_location_travel_plan_id", columnList = "travel_plan_id")
-})
+@Table(name = "locations",
+        indexes = {
+                @Index(name = "idx_location_travel_plan_id", columnList = "travel_plan_id")
+        },
+        uniqueConstraints = {
+                @UniqueConstraint(columnNames = {"travel_plan_id", "visit_order"})
+        }
+)
 public class Location {
 
     @Id

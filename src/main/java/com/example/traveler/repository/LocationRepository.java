@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import com.example.traveler.model.Location;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,4 +20,6 @@ public interface LocationRepository extends JpaRepository<Location, UUID> {
      */
     @Query("SELECT MAX(l.visitOrder) FROM Location l WHERE l.travelPlan.id = :planId")
     Optional<Integer> findMaxVisitOrderByTravelPlanId(@Param("planId") UUID planId);
+
+    List<Location> findAllByTravelPlanIdOrderByVisitOrderAsc(UUID travelPlanId);
 }

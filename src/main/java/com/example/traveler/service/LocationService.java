@@ -2,6 +2,8 @@ package com.example.traveler.service;
 
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.OptimisticLockException;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,14 +24,23 @@ public class LocationService {
 
     private final LocationRepository locationRepository;
     private final TravelPlanRepository planRepository;
+    private final EntityManager entityManager;
 
+    @Transactional
     public LocationDTO addLocationToPlan(UUID planId, CreateLocationRequest request) {
         if (request.departureDate() != null && request.arrivalDate() != null && request.departureDate().isBefore(request.arrivalDate())) {
             throw new IllegalStateException("Departure date cannot be before arrival date");
         }
 
-        TravelPlan plan = planRepository.findById(planId)
-                .orElseThrow(() -> new EntityNotFoundException("Plan not found with id: " + planId));
+        TravelPlan plan = entityManager.find(
+                TravelPlan.class,
+                planId,
+                LockModeType.PESSIMISTIC_WRITE
+        );
+
+        if (plan == null) {
+            throw new EntityNotFoundException("Plan not found with id: " + planId);
+        }
 
         int maxOrder = locationRepository.findMaxVisitOrderByTravelPlanId(planId)
                 .orElse(0);
