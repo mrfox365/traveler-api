@@ -6,11 +6,15 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate } from 'k6/metrics';
+import exec from 'k6/execution';
 import { ENDPOINTS, DEFAULT_HEADERS } from '../config/endpoints.js';
 
 // Кастомні метрики
 export const errorRate = new Rate('api_errors');
 export const conflictRate = new Rate('optimistic_lock_conflicts');
+
+// Ліміт часу (мс), після якого вважаємо, що почалася деградація
+const DEGRADATION_THRESHOLD_MS = 500;
 
 /**
  * Виконує HTTP запит з перевірками та метриками
@@ -34,6 +38,25 @@ function makeRequest(method, url, body = null, expectedStatuses = [200], operati
   } else {
     response = http.request(method, url, null, params);
   }
+
+  // === МОНІТОРИНГ В РЕАЛЬНОМУ ЧАСІ ===
+
+  const currentVUs = exec.instance.vusActive; // Скільки юзерів зараз
+  const duration = response.timings.duration; // Скільки тривав запит
+
+  // 1. Ловимо точку відмови (Breaking Point)
+  if (response.status >= 500 || response.status === 0) {
+    console.error(`🔥 BREAKING POINT DETECTED! Status: ${response.status} | Users: ${currentVUs} | Time: ${new Date().toLocaleTimeString()}`);
+  }
+
+  // 2. Ловимо деградацію (тільки якщо запит успішний, але повільний)
+  // Використовуємо Date.now() щоб не забивати консоль тисячами повідомлень
+  if (duration > DEGRADATION_THRESHOLD_MS && response.status < 500) {
+    if (exec.vu.idInTest === 1) {
+      console.warn(`⚠️ DEGRADATION DETECTED! Latency: ${Math.round(duration)}ms | Users: ${currentVUs} | Time: ${new Date().toLocaleTimeString()}`);
+    }
+  }
+  // ====================================
 
   const statusCheck = check(response, {
     [`status is one of [${statuses.join(',')}]`]: (r) => statuses.includes(r.status),
