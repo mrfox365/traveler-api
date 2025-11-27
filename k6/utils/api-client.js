@@ -27,7 +27,7 @@ function makeRequest(method, url, body = null, expectedStatuses = [200], operati
     headers: DEFAULT_HEADERS,
     tags: {
       type: operationType,
-      endpoint: url.replace(/\/[0-9a-f-]{36}/g, '/:id'),
+      endpoint: url.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig, ':id'),
     },
     responseCallback: http.expectedStatuses(...statuses),
   };
