@@ -19,6 +19,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    command: postgres -c 'max_connections=1200'
 
   # Сервіс вашого API
   app:
