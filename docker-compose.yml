@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # Сервіс бази даних
+  db:
+    image: postgres:15-alpine
+    container_name: traveler-db
+    environment:
+      POSTGRES_DB: traveler_api_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 09125689
+    ports:
+      - "5432:5432" # Прокидаємо порт назовні (щоб можна було підключитись через IDEA/PgAdmin)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Зберігаємо дані, щоб не зникали при перезапуску
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Сервіс вашого API
+  app:
+    build: .             # Будуємо образ з поточного Dockerfile
+    container_name: traveler-api
+    ports:
+      - "8080:8080"      # Доступ до API через localhost:8080
+    environment:
+      # Перевизначаємо налаштування з application.properties
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/traveler_api_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 09125689
+      # Hibernate налаштування
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    depends_on:
+      db:
+        condition: service_healthy # Чекаємо, поки база повністю запуститься
+    restart: on-failure
+
+volumes:
+  postgres_data:
