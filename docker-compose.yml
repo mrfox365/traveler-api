@@ -60,6 +60,33 @@ services:
     volumes:
       - postgres_replica_data:/var/lib/postgresql/data
 
+  # === CONFIGURATOR ===
+  # Цей контейнер живе кілька секунд. Він вмикає синхронність.
+  db-configurator:
+    image: postgres:15-alpine
+    container_name: traveler-db-configurator
+    environment:
+      PGPASSWORD: 09125689
+    command: >
+      bash -c "
+      echo 'Waiting for Master DB...';
+      until pg_isready -h db -p 5432 -U postgres; do sleep 2; done;
+      echo 'Waiting for Replica to connect...';
+      until psql -h db -U postgres -d traveler_api_db -t -c 'SELECT count(*) FROM pg_stat_replication' | grep -q '1'; do
+        echo 'Replica not connected yet...';
+        sleep 2;
+      done;
+      echo 'Replica connected! Enabling Synchronous Replication...';
+      psql -h db -U postgres -c \"ALTER SYSTEM SET synchronous_standby_names = '*';\";
+      psql -h db -U postgres -c \"SELECT pg_reload_conf();\";
+      echo 'SUCCESS: Replication is now SYNCHRONOUS.';
+      "
+    depends_on:
+      db:
+        condition: service_healthy
+      db-replica:
+        condition: service_started
+
   # === API ===
   app:
     build: .
@@ -70,7 +97,6 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/traveler_api_db
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: 09125689
-      # Вимикаємо ddl-auto, бо ми тепер створюємо таблиці через скрипт
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
     depends_on:
       db:
