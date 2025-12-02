@@ -1,0 +1,14 @@
+FROM postgres:15-alpine
+
+# Копіюємо скрипти всередину образу
+COPY db/migrations/ /docker-entrypoint-migrations/
+COPY db/replications/ /docker-entrypoint-replications/
+
+# Копіюємо головний скрипт у папку автозапуску
+COPY db/replications/common/500_orchestrate.sh /docker-entrypoint-initdb.d/
+
+# Запуск скриптів з відповідними правами
+RUN chmod +x /docker-entrypoint-initdb.d/500_orchestrate.sh
+RUN chmod +x /docker-entrypoint-replications/common/*.sh
+RUN chmod +x /docker-entrypoint-replications/publisher/*.sh
+RUN chmod +x /docker-entrypoint-replications/subscriber/*.sh

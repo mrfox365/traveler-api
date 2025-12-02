@@ -1,43 +1,76 @@
 version: '3.8'
 
 services:
-  # Сервіс бази даних
+  # === MASTER DB (Publisher) ===
   db:
     image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.db
     container_name: traveler-db
     environment:
       POSTGRES_DB: traveler_api_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 09125689
+      ROLE: publisher
     ports:
-      - "5432:5432" # Прокидаємо порт назовні (щоб можна було підключитись через IDEA/PgAdmin)
+      - "5432:5432"
+    # Специфічні налаштування для Master (Publisher)
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_connections=1200"
     volumes:
-      - postgres_data:/var/lib/postgresql/data # Зберігаємо дані, щоб не зникали при перезапуску
-    restart: unless-stopped
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
-    command: postgres -c 'max_connections=1200'
 
-  # Сервіс вашого API
+  # === REPLICA DB (Subscriber) ===
+  db-replica:
+    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    container_name: traveler-db-replica
+    environment:
+      POSTGRES_DB: traveler_api_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 09125689
+      ROLE: subscriber
+    ports:
+      - "5433:5432" # Зовнішній порт 5433, щоб не конфліктувати з майстром
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # === API ===
   app:
-    build: .             # Будуємо образ з поточного Dockerfile
+    build: .
     container_name: traveler-api
     ports:
-      - "8080:8080"      # Доступ до API через localhost:8080
+      - "8080:8080"
     environment:
-      # Перевизначаємо налаштування з application.properties
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/traveler_api_db
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: 09125689
-      # Hibernate налаштування
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      # Вимикаємо ddl-auto, бо ми тепер створюємо таблиці через скрипт
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
     depends_on:
       db:
-        condition: service_healthy # Чекаємо, поки база повністю запуститься
+        condition: service_healthy
     restart: on-failure
 
 volumes:
   postgres_data:
+  postgres_replica_data:
