@@ -19,7 +19,7 @@ services:
     command:
       - "postgres"
       - "-c"
-      - "wal_level=logical"
+      - "wal_level=replica"
       - "-c"
       - "max_replication_slots=10"
       - "-c"
@@ -34,25 +34,31 @@ services:
       timeout: 5s
       retries: 5
 
-  # === REPLICA DB (Subscriber) ===
+  # === REPLICA DB (Standby) ===
   db-replica:
     image: postgres:15-alpine
-    build:
-      context: .
-      dockerfile: Dockerfile.db
     container_name: traveler-db-replica
     environment:
-      POSTGRES_DB: traveler_api_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 09125689
-      ROLE: subscriber
+      PGPASSWORD: rep_password # Пароль користувача rep_user для pg_basebackup
     ports:
-      - "5433:5432" # Зовнішній порт 5433, щоб не конфліктувати з майстром
-    volumes:
-      - postgres_replica_data:/var/lib/postgresql/data
+      - "5433:5432"
+    command: >
+      bash -c "
+      rm -rf /var/lib/postgresql/data/*;
+      until pg_isready -h db -p 5432 -U postgres; do
+        echo 'Waiting for master to become ready...';
+        sleep 2;
+      done;
+      echo 'Starting base backup...';
+      pg_basebackup -h db -p 5432 -U rep_user -D /var/lib/postgresql/data -R -P -X stream;
+      echo 'Starting replica...';
+      docker-entrypoint.sh postgres -c max_connections=1200
+      "
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
 
   # === API ===
   app:
