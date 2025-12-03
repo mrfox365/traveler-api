@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_DB: traveler_api_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 09125689
+      POSTGRES_PASSWORD: "09125689"
       ROLE: publisher
       REP_USER: replication_user
       REP_PASS: secret_replication_pass
@@ -23,8 +23,6 @@ services:
       - "max_replication_slots=10"
       - "-c"
       - "max_wal_senders=10"
-      - "-c"
-      - "max_connections=1200"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -40,6 +38,7 @@ services:
     environment:
       REP_USER: replication_user
       PGPASSWORD: secret_replication_pass
+      POSTGRES_PASSWORD: "09125689"
     ports:
       - "127.0.0.1:5438:5432"
     command: >
@@ -55,7 +54,7 @@ services:
       echo \"primary_conninfo = 'host=db port=5432 user=$$REP_USER password=$$PGPASSWORD application_name=traveler_replica_1'\" >> /var/lib/postgresql/data/postgresql.auto.conf;
       
       echo 'Starting replica 1...';
-      docker-entrypoint.sh postgres -c max_connections=1200
+      docker-entrypoint.sh postgres
       "
     depends_on:
       db:
@@ -70,6 +69,7 @@ services:
     environment:
       REP_USER: replication_user
       PGPASSWORD: secret_replication_pass
+      POSTGRES_PASSWORD: "09125689"
     ports:
       - "127.0.0.1:5439:5432"
     command: >
@@ -85,7 +85,7 @@ services:
       echo \"primary_conninfo = 'host=db port=5432 user=$$REP_USER password=$$PGPASSWORD application_name=traveler_replica_2'\" >> /var/lib/postgresql/data/postgresql.auto.conf;
       
       echo 'Starting replica 2...';
-      docker-entrypoint.sh postgres -c max_connections=1200
+      docker-entrypoint.sh postgres
       "
     depends_on:
       db:
@@ -98,7 +98,7 @@ services:
     image: postgres:15-alpine
     container_name: traveler-db-configurator
     environment:
-      PGPASSWORD: 09125689
+      PGPASSWORD: "09125689"
     command: >
       bash -c "
       echo 'Waiting for Master DB...';
@@ -125,6 +125,23 @@ services:
       db-replica-2:
         condition: service_started
 
+  # === PGCAT (CONNECTION POOLER & LOAD BALANCER) ===
+  pgcat:
+    image: ghcr.io/postgresml/pgcat:latest
+    container_name: traveler-pgcat
+    restart: always
+    ports:
+      - "6432:6432"
+    volumes:
+      - ./pgcat.toml:/etc/pgcat/pgcat.toml
+    depends_on:
+      db:
+        condition: service_healthy
+      db-replica-1:
+        condition: service_started
+      db-replica-2:
+        condition: service_started
+
   # === API ===
   app:
     build: .
@@ -132,13 +149,15 @@ services:
     ports:
       - "8080:8080"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/traveler_api_db
+      SPRING_DATASOURCE_URL: jdbc:postgresql://pgcat:6432/traveler_api_db
       SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: 09125689
+      SPRING_DATASOURCE_PASSWORD: "09125689"
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
     depends_on:
       db:
         condition: service_healthy
+      pgcat:
+        condition: service_started
     restart: on-failure
 
 volumes:

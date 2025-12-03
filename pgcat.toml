@@ -1,0 +1,27 @@
+[general]
+host = "0.0.0.0"
+port = 6432
+admin_username = "admin"
+admin_password = "admin_password"
+noreply_logging = false
+
+[pools.traveler_api_db]
+pool_mode = "transaction"
+
+[pools.traveler_api_db.users.postgres]
+username = "postgres"
+password = "09125689"
+pool_size = 10
+default_role = "primary"
+
+# Визначення серверів
+[pools.traveler_api_db.shards.0]
+database = "traveler_api_db"
+servers = [
+    # Primary (Master)
+    { host = "traveler-db", port = 5432, role = "primary" },
+
+    # Replicas
+    { host = "traveler-db-replica-1", port = 5432, role = "replica" },
+    { host = "traveler-db-replica-2", port = 5432, role = "replica" },
+]
