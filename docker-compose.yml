@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # === MASTER DB (Publisher) ===
   db:
@@ -13,6 +11,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 09125689
       ROLE: publisher
+      REP_USER: replication_user
+      REP_PASS: secret_replication_pass
     ports:
       - "5432:5432"
     # Специфічні налаштування для Master (Publisher)
@@ -39,7 +39,8 @@ services:
     image: postgres:15-alpine
     container_name: traveler-db-replica
     environment:
-      PGPASSWORD: rep_password # Пароль користувача rep_user для pg_basebackup
+      REP_USER: replication_user
+      PGPASSWORD: secret_replication_pass
     ports:
       - "5433:5432"
     command: >
@@ -50,7 +51,8 @@ services:
         sleep 2;
       done;
       echo 'Starting base backup...';
-      pg_basebackup -h db -p 5432 -U rep_user -D /var/lib/postgresql/data -R -P -X stream;
+      pg_basebackup -h db -p 5432 -U $$REP_USER -D /var/lib/postgresql/data -R -P -X stream;
+      echo \"primary_conninfo = 'host=db port=5432 user=$$REP_USER password=$$PGPASSWORD application_name=traveler_replica'\" >> /var/lib/postgresql/data/postgresql.auto.conf;
       echo 'Starting replica...';
       docker-entrypoint.sh postgres -c max_connections=1200
       "
