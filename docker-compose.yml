@@ -1,5 +1,5 @@
 services:
-  # === MASTER DB (Publisher) ===
+  # === MASTER DB ===
   db:
     image: postgres:15-alpine
     build:
@@ -14,8 +14,7 @@ services:
       REP_USER: replication_user
       REP_PASS: secret_replication_pass
     ports:
-      - "127.0.0.1:5438:5432"
-    # Специфічні налаштування для Master (Publisher)
+      - "127.0.0.1:5437:5432"
     command:
       - "postgres"
       - "-c"
@@ -34,10 +33,40 @@ services:
       timeout: 5s
       retries: 5
 
-  # === REPLICA DB (Standby) ===
-  db-replica:
+  # === REPLICA DB 1 ===
+  db-replica-1:
     image: postgres:15-alpine
-    container_name: traveler-db-replica
+    container_name: traveler-db-replica-1
+    environment:
+      REP_USER: replication_user
+      PGPASSWORD: secret_replication_pass
+    ports:
+      - "127.0.0.1:5438:5432"
+    command: >
+      bash -c "
+      rm -rf /var/lib/postgresql/data/*;
+      until pg_isready -h db -p 5432 -U postgres; do
+        echo 'Waiting for master...';
+        sleep 2;
+      done;
+      echo 'Starting base backup...';
+      pg_basebackup -h db -p 5432 -U $$REP_USER -D /var/lib/postgresql/data -R -P -X stream;
+      
+      echo \"primary_conninfo = 'host=db port=5432 user=$$REP_USER password=$$PGPASSWORD application_name=traveler_replica_1'\" >> /var/lib/postgresql/data/postgresql.auto.conf;
+      
+      echo 'Starting replica 1...';
+      docker-entrypoint.sh postgres -c max_connections=1200
+      "
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - postgres_replica_1_data:/var/lib/postgresql/data
+
+  # === REPLICA DB 2 ===
+  db-replica-2:
+    image: postgres:15-alpine
+    container_name: traveler-db-replica-2
     environment:
       REP_USER: replication_user
       PGPASSWORD: secret_replication_pass
@@ -47,23 +76,24 @@ services:
       bash -c "
       rm -rf /var/lib/postgresql/data/*;
       until pg_isready -h db -p 5432 -U postgres; do
-        echo 'Waiting for master to become ready...';
+        echo 'Waiting for master...';
         sleep 2;
       done;
       echo 'Starting base backup...';
       pg_basebackup -h db -p 5432 -U $$REP_USER -D /var/lib/postgresql/data -R -P -X stream;
-      echo \"primary_conninfo = 'host=db port=5432 user=$$REP_USER password=$$PGPASSWORD application_name=traveler_replica'\" >> /var/lib/postgresql/data/postgresql.auto.conf;
-      echo 'Starting replica...';
+      
+      echo \"primary_conninfo = 'host=db port=5432 user=$$REP_USER password=$$PGPASSWORD application_name=traveler_replica_2'\" >> /var/lib/postgresql/data/postgresql.auto.conf;
+      
+      echo 'Starting replica 2...';
       docker-entrypoint.sh postgres -c max_connections=1200
       "
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - postgres_replica_data:/var/lib/postgresql/data
+      - postgres_replica_2_data:/var/lib/postgresql/data
 
   # === CONFIGURATOR ===
-  # Цей контейнер живе кілька секунд. Він вмикає синхронність.
   db-configurator:
     image: postgres:15-alpine
     container_name: traveler-db-configurator
@@ -73,20 +103,26 @@ services:
       bash -c "
       echo 'Waiting for Master DB...';
       until pg_isready -h db -p 5432 -U postgres; do sleep 2; done;
-      echo 'Waiting for Replica to connect...';
-      until psql -h db -U postgres -d traveler_api_db -t -c 'SELECT count(*) FROM pg_stat_replication' | grep -q '1'; do
-        echo 'Replica not connected yet...';
+      
+      echo 'Waiting for 2 Replicas...';
+      until [ \$(psql -h db -U postgres -d traveler_api_db -t -c 'SELECT count(*) FROM pg_stat_replication') -ge 2 ]; do
+        echo 'Waiting...';
         sleep 2;
       done;
-      echo 'Replica connected! Enabling Synchronous Replication...';
-      psql -h db -U postgres -c \"ALTER SYSTEM SET synchronous_standby_names = '*';\";
+      
+      echo 'Replicas connected! Enabling FULL SYNC...';
+      
+      psql -h db -U postgres -c \"ALTER SYSTEM SET synchronous_standby_names = 'FIRST 2 (traveler_replica_1, traveler_replica_2)';\";
       psql -h db -U postgres -c \"SELECT pg_reload_conf();\";
-      echo 'SUCCESS: Replication is now SYNCHRONOUS.';
+      
+      echo 'SUCCESS: Both replicas are now SYNCHRONOUS.';
       "
     depends_on:
       db:
         condition: service_healthy
-      db-replica:
+      db-replica-1:
+        condition: service_started
+      db-replica-2:
         condition: service_started
 
   # === API ===
@@ -107,4 +143,5 @@ services:
 
 volumes:
   postgres_data:
-  postgres_replica_data:
+  postgres_replica_1_data:
+  postgres_replica_2_data:
