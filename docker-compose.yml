@@ -14,7 +14,7 @@ services:
       REP_USER: replication_user
       REP_PASS: secret_replication_pass
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5438:5432"
     # Специфічні налаштування для Master (Publisher)
     command:
       - "postgres"
@@ -42,7 +42,7 @@ services:
       REP_USER: replication_user
       PGPASSWORD: secret_replication_pass
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5439:5432"
     command: >
       bash -c "
       rm -rf /var/lib/postgresql/data/*;
