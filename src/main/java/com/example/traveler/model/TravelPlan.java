@@ -23,7 +23,6 @@ import java.util.UUID;
 public class TravelPlan {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
     private UUID id;
 
     @Size(min = 1, max = 200)

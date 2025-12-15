@@ -27,7 +27,6 @@ import java.util.UUID;
 public class Location {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
     private UUID id;
 
     // Зворотній зв'язок до плану подорожі

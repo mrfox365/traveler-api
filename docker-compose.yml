@@ -1,196 +1,78 @@
 services:
-  # === MASTER DB ===
-  db:
+  # === Shard Node 0 (db_0 ... db_3) ===
+  postgres_00:
     image: postgres:15-alpine
-    build:
-      context: .
-      dockerfile: Dockerfile.db
-    container_name: traveler-db
     environment:
-      POSTGRES_DB: traveler_api_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "09125689"
-      ROLE: publisher
-      REP_USER: replication_user
-      REP_PASS: secret_replication_pass
-    ports:
-      - "127.0.0.1:5437:5432"
-    command:
-      - "postgres"
-      - "-c"
-      - "wal_level=replica"
-      - "-c"
-      - "max_replication_slots=10"
-      - "-c"
-      - "max_wal_senders=10"
-      - "-c"
-      - "max_connections=200"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # === REPLICA DB 1 ===
-  db-replica-1:
-    image: postgres:15-alpine
-    container_name: traveler-db-replica-1
-    environment:
-      REP_USER: replication_user
-      PGPASSWORD: secret_replication_pass
       POSTGRES_PASSWORD: "09125689"
     ports:
-      - "127.0.0.1:5438:5432"
-    command: >
-      bash -c "
-      rm -rf /var/lib/postgresql/data/*;
-      until pg_isready -h db -p 5432 -U postgres; do
-        echo 'Waiting for master...';
-        sleep 2;
-      done;
-      echo 'Starting base backup...';
-      pg_basebackup -h db -p 5432 -U $$REP_USER -D /var/lib/postgresql/data -R -P -X stream;
-      
-      echo \"primary_conninfo = 'host=db port=5432 user=$$REP_USER password=$$PGPASSWORD application_name=traveler_replica_1'\" >> /var/lib/postgresql/data/postgresql.auto.conf;
-      
-      echo 'max_connections = 200' >> /var/lib/postgresql/data/postgresql.conf;
-      
-      echo 'Starting replica 1...';
-      docker-entrypoint.sh postgres
-      "
-    depends_on:
-      db:
-        condition: service_healthy
+      - "5432:5432"
     volumes:
-      - postgres_replica_1_data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $$REP_USER -d traveler_api_db" ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+      - ./db/init-shards.sql:/docker-entrypoint-initdb.d/init.sql
 
-  # === REPLICA DB 2 ===
-  db-replica-2:
+  # === Shard Node 1 (db_4 ... db_7) ===
+  postgres_01:
     image: postgres:15-alpine
-    container_name: traveler-db-replica-2
     environment:
-      REP_USER: replication_user
-      PGPASSWORD: secret_replication_pass
       POSTGRES_PASSWORD: "09125689"
     ports:
-      - "127.0.0.1:5439:5432"
-    command: >
-      bash -c "
-      rm -rf /var/lib/postgresql/data/*;
-      until pg_isready -h db -p 5432 -U postgres; do
-        echo 'Waiting for master...';
-        sleep 2;
-      done;
-      echo 'Starting base backup...';
-      pg_basebackup -h db -p 5432 -U $$REP_USER -D /var/lib/postgresql/data -R -P -X stream;
-      
-      echo \"primary_conninfo = 'host=db port=5432 user=$$REP_USER password=$$PGPASSWORD application_name=traveler_replica_2'\" >> /var/lib/postgresql/data/postgresql.auto.conf;
-      
-      echo 'max_connections = 200' >> /var/lib/postgresql/data/postgresql.conf;
-      
-      echo 'Starting replica 2...';
-      docker-entrypoint.sh postgres
-      "
-    depends_on:
-      db:
-        condition: service_healthy
+      - "5433:5432"
     volumes:
-      - postgres_replica_2_data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $$REP_USER -d traveler_api_db" ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+      - ./db/init-shards.sql:/docker-entrypoint-initdb.d/init.sql
 
-  # === CONFIGURATOR ===
-  db-configurator:
+  # === Shard Node 2 (db_8 ... db_b) ===
+  postgres_02:
     image: postgres:15-alpine
-    container_name: traveler-db-configurator
     environment:
-      PGPASSWORD: "09125689"
-    command: >
-      bash -c "
-      echo 'Waiting for Master DB...';
-      until pg_isready -h db -p 5432 -U postgres; do sleep 2; done;
-      
-      echo 'Waiting for 2 Replicas...';
-      until [ \$(psql -h db -U postgres -d traveler_api_db -t -c 'SELECT count(*) FROM pg_stat_replication') -ge 2 ]; do
-        echo 'Waiting...';
-        sleep 2;
-      done;
-      
-      echo 'Replicas connected! Enabling FULL SYNC...';
-      
-      psql -h db -U postgres -c \"ALTER SYSTEM SET synchronous_standby_names = 'FIRST 2 (traveler_replica_1, traveler_replica_2)';\";
-      psql -h db -U postgres -c \"SELECT pg_reload_conf();\";
-      
-      echo 'SUCCESS: Both replicas are now SYNCHRONOUS.';
-      "
-    depends_on:
-      db:
-        condition: service_healthy
-      db-replica-1:
-        condition: service_started
-      db-replica-2:
-        condition: service_started
-
-  # === PGCAT (CONNECTION POOLER & LOAD BALANCER) ===
-  pgcat:
-    build:
-      context: .
-      dockerfile: Dockerfile.pgcat
-    container_name: traveler-pgcat
+      POSTGRES_PASSWORD: "09125689"
     ports:
-      - "6432:6432"
-    depends_on:
-      db:
-        condition: service_healthy
-      db-replica-1:
-        condition: service_started
-      db-replica-2:
-        condition: service_started
-    restart: on-failure
+      - "5434:5432"
+    volumes:
+      - ./db/init-shards.sql:/docker-entrypoint-initdb.d/init.sql
 
-  # === API ===
+  # === Shard Node 3 (db_c ... db_f) ===
+  postgres_03:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_PASSWORD: "09125689"
+    ports:
+      - "5435:5432"
+    volumes:
+      - ./db/init-shards.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # === AUTOMATIC SCHEMA INITIALIZER ===
+  schema-init:
+    image: postgres:15-alpine
+    container_name: traveler-schema-init
+    volumes:
+      - ./init-schema.sh:/init-schema.sh
+    entrypoint: ["/bin/sh", "/init-schema.sh"]
+    depends_on:
+      - postgres_00
+      - postgres_01
+      - postgres_02
+      - postgres_03
+    networks:
+      - default
+
   app:
     build: .
-    container_name: traveler-api
     ports:
       - "8080:8080"
     environment:
-      # === WRITER (Master) ===
-      SPRING_DATASOURCE_WRITER_URL: jdbc:postgresql://pgcat:6432/traveler_api_db
-      SPRING_DATASOURCE_WRITER_USERNAME: postgres
-      SPRING_DATASOURCE_WRITER_PASSWORD: "09125689"
-      SPRING_DATASOURCE_WRITER_DRIVER_CLASS_NAME: org.postgresql.Driver
-
-      # === READER (Replica via PgCat pool) ===
-      SPRING_DATASOURCE_READER_URL: jdbc:postgresql://pgcat:6432/traveler_api_db_read
-      SPRING_DATASOURCE_READER_USERNAME: postgres
-      SPRING_DATASOURCE_READER_PASSWORD: "09125689"
-      SPRING_DATASOURCE_READER_DRIVER_CLASS_NAME: org.postgresql.Driver
-
-      # Інші налаштування JPA
-      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      # Вимикаємо DDL-auto, бо Hibernate не вміє створювати таблиці на 16 базах одночасно
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
       SPRING_JPA_SHOW_SQL: "true"
-      SPRING_JPA_OPEN_IN_VIEW: "false"
+    volumes:
+      # Монтуємо файл конфігурації мапінгу
+      - ./sharding-config:/config
     depends_on:
-      db:
-        condition: service_healthy
-      pgcat:
+      postgres_00:
         condition: service_started
-    restart: on-failure
-
-volumes:
-  postgres_data:
-  postgres_replica_1_data:
-  postgres_replica_2_data:
+      postgres_01:
+        condition: service_started
+      postgres_02:
+        condition: service_started
+      postgres_03:
+        condition: service_started
+      schema-init:
+        condition: service_completed_successfully
