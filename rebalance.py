@@ -1,15 +1,13 @@
 import psycopg2
 import sys
-import json
 import time
 import os
 
 # --- КОНФІГУРАЦІЯ ---
 DB_USER = "postgres"
 DB_PASS = "09125689"
-MAPPING_FILE = "/config/mapping.json" # Шлях всередині контейнера
 
-# Визначаємо хости (всередині Docker мережі)
+# Визначаємо хости
 NODES = {
     "postgres_00": {"host": "postgres_00", "port": 5432},
     "postgres_01": {"host": "postgres_01", "port": 5432},
@@ -17,7 +15,14 @@ NODES = {
     "postgres_03": {"host": "postgres_03", "port": 5432},
 }
 
+# Конфіг каталогу (Реєстру)
+CATALOG_NODE = {"host": "postgres_00", "port": 5432, "db": "shard_catalog"}
+
 def get_connection(node_name, db_name):
+    """Створює з'єднання до будь-якої бази даних."""
+    if node_name not in NODES:
+        raise ValueError(f"Unknown node: {node_name}")
+
     conf = NODES[node_name]
     conn = psycopg2.connect(
         host=conf["host"], port=conf["port"], database=db_name, user=DB_USER, password=DB_PASS
@@ -25,52 +30,53 @@ def get_connection(node_name, db_name):
     conn.autocommit = True
     return conn
 
-def update_mapping_file(db_name, new_url):
-    print(f"Updating mapping.json for {db_name}...")
-    with open(MAPPING_FILE, 'r') as f:
-        data = json.load(f)
+def get_catalog_connection():
+    """Створює з'єднання до бази реєстру."""
+    return psycopg2.connect(
+        host=CATALOG_NODE["host"], port=CATALOG_NODE["port"],
+        database=CATALOG_NODE["db"], user=DB_USER, password=DB_PASS
+    )
 
-    # Знаходимо ключ за назвою БД (наприклад, "db_a" -> "a")
-    shard_key = None
-    for k, v in data.items():
-        if f"/{db_name}" in v:
-            shard_key = k
-            break
+def update_mapping_db(shard_key, new_url):
+    """Оновлює запис у базі реєстру."""
+    print(f"Updating Database Registry for shard '{shard_key}'...")
+    conn = get_catalog_connection()
+    cur = conn.cursor()
 
-    if not shard_key:
-        raise Exception(f"Shard key not found for {db_name}")
-
-    data[shard_key] = new_url
-
-    with open(MAPPING_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
-    print("Mapping updated.")
+    sql = "UPDATE shard_mapping SET jdbc_url = %s WHERE shard_key = %s"
+    cur.execute(sql, (new_url, shard_key))
+    conn.commit()
+    conn.close()
+    print("Registry updated.")
 
 def rebalance(db_name, target_node):
-    # 1. Знаходимо поточний вузол (Source)
-    with open(MAPPING_FILE, 'r') as f:
-        mapping = json.load(f)
+    print(f"Preparing rebalance for {db_name} -> {target_node}...")
 
-    source_url = None
-    shard_key = None
-    for k, v in mapping.items():
-        if f"/{db_name}" in v:
-            source_url = v
-            shard_key = k
-            break
+    # 1. Отримуємо поточний URL з БД Реєстру
+    conn = get_catalog_connection()
+    cur = conn.cursor()
 
-    if not source_url:
-        print(f"Database {db_name} not found in mapping")
+    # Витягуємо shard_key з імені бази
+    shard_key = db_name.split("_")[1]
+
+    cur.execute("SELECT jdbc_url FROM shard_mapping WHERE shard_key = %s", (shard_key,))
+    result = cur.fetchone()
+    conn.close()
+
+    if not result:
+        print(f"Shard {shard_key} not found in registry")
         return
 
-    # Парсимо хост з URL (jdbc:postgresql://postgres_02:5432/db_a)
+    source_url = result[0]
+    # source_url = jdbc:postgresql://postgres_02:5432/db_a
+    # Парсимо хост: postgres_02
     source_node = source_url.split("//")[1].split(":")[0]
 
     if source_node == target_node:
-        print("⚠Source and Target are the same. Nothing to do.")
+        print("Source and Target are the same. Nothing to do.")
         return
 
-    print(f"STARTING REBALANCE: {db_name} from {source_node} -> {target_node}")
+    print(f"STARTING MIGRATION: {source_node} -> {target_node}")
 
     src_conn = get_connection(source_node, db_name)
     tgt_admin_conn = get_connection(target_node, "postgres") # Для створення БД
@@ -86,7 +92,6 @@ def rebalance(db_name, target_node):
     tgt_conn = get_connection(target_node, db_name)
 
     # B. Створюємо схему (таблиці) на Target
-    # У реальному житті краще pg_dump -s, тут спрощено для лаби
     print("   Applying schema to target...")
     schema_sql = """
     CREATE TABLE IF NOT EXISTS travel_plans (id UUID PRIMARY KEY, budget NUMERIC(38, 2), created_at TIMESTAMP(6) WITH TIME ZONE, currency VARCHAR(255), description VARCHAR(255), end_date TIMESTAMP(6) WITH TIME ZONE, is_public BOOLEAN NOT NULL, start_date TIMESTAMP(6) WITH TIME ZONE, title VARCHAR(255), updated_at TIMESTAMP(6) WITH TIME ZONE, version INTEGER);
@@ -105,7 +110,6 @@ def rebalance(db_name, target_node):
         pass
 
     print("   2. Creating SUBSCRIPTION on Target...")
-    # Важливо: Target повинен знати як достукатися до Source (внутрішній докер хост)
     conn_str = f"host={source_node} port=5432 dbname={db_name} user={DB_USER} password={DB_PASS}"
     try:
         tgt_conn.cursor().execute(f"CREATE SUBSCRIPTION {sub_name} CONNECTION '{conn_str}' PUBLICATION {pub_name}")
@@ -114,41 +118,46 @@ def rebalance(db_name, target_node):
 
     # D. Чекаємо синхронізації
     print("   Waiting for initial sync...")
-    time.sleep(5) # Спрощено. В реальності треба перевіряти pg_stat_subscription
+    time.sleep(5)
 
     # E. Ексклюзивне блокування (Cutover)
     print("   3. LOCKING Source tables (Stop Writes)...")
     src_conn.autocommit = False # Починаємо транзакцію
     src_cur = src_conn.cursor()
-    # Блокуємо на запис, але дозволяємо читання, поки реплікація добігає
     src_cur.execute("LOCK TABLE travel_plans, locations IN EXCLUSIVE MODE")
 
     print("   Syncing final changes...")
-    time.sleep(2) # Даємо час добігти останнім байтам
+    time.sleep(2)
 
     # F. Промоція Target
     print("   4. Detaching Subscription (Promote)...")
     tgt_conn.cursor().execute(f"DROP SUBSCRIPTION {sub_name}")
-    src_conn.cursor().execute(f"DROP PUBLICATION {pub_name}") # Видаляємо публ в тій же транзакції (або ні)
+    # Важливо: publication видаляємо в тій же транзакції, якщо це можливо, або пізніше
+    # Тут ми просто залишаємо її, щоб не ламати транзакцію блокування
 
-    # G. Оновлення мапінгу
+    # G. Оновлення мапінгу в БД
     new_jdbc_url = f"jdbc:postgresql://{target_node}:5432/{db_name}"
-    update_mapping_file(db_name, new_jdbc_url)
+    update_mapping_db(shard_key, new_jdbc_url)
 
     # H. "Отруєння" старого джерела (Fencing)
     print("   6. Revoking permissions on Source...")
-    # Відкликаємо права connect для користувача (або перейменовуємо таблиці)
-    # Щоб програма отримала помилку і перечитала конфіг
     src_cur.execute("ALTER TABLE travel_plans RENAME TO travel_plans_moved")
     src_cur.execute("ALTER TABLE locations RENAME TO locations_moved")
 
     src_conn.commit() # Фіксуємо блокування/перейменування
+
+    # Прибираємо сміття на джерелі (вже поза транзакцією)
+    src_conn.autocommit = True
+    try:
+        src_conn.cursor().execute(f"DROP PUBLICATION {pub_name}")
+    except:
+        pass
+
     print("REBALANCE COMPLETE!")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python rebalance.py <db_name> <target_node>")
-        print("Example: python rebalance.py db_a postgres_00")
         sys.exit(1)
 
     rebalance(sys.argv[1], sys.argv[2])

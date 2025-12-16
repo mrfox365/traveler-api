@@ -1,49 +1,61 @@
 package com.example.traveler.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource;
-import java.io.File;
-import java.io.IOException;
+
+import java.sql.*;
 import java.util.HashMap;
 import java.util.Map;
 
 public class ShardingRoutingDataSource extends AbstractRoutingDataSource {
 
-    private final String configPath;
-
-    public ShardingRoutingDataSource(String configPath) {
-        this.configPath = configPath;
-    }
+    // URL до каталогу (завжди на postgres_00)
+    private final String CATALOG_URL = "jdbc:postgresql://postgres_00:5432/shard_catalog";
+    private final String DB_USER = "postgres";
+    private final String DB_PASS = "09125689";
 
     @Override
     protected Object determineCurrentLookupKey() {
         return ShardContext.getShard();
     }
 
-    // Метод для оновлення пулів з'єднань на льоту
-    public void refreshDataSources() throws IOException {
-        System.out.println("🔄 Refreshing DataSources from " + configPath);
-
-        ObjectMapper mapper = new ObjectMapper();
-        Map<String, String> mapping = mapper.readValue(new File(configPath), Map.class);
+    public void refreshDataSources() {
+        System.out.println("Connecting to Shard Catalog DB...");
 
         Map<Object, Object> targetDataSources = new HashMap<>();
 
-        for (Map.Entry<String, String> entry : mapping.entrySet()) {
-            HikariDataSource ds = new HikariDataSource();
-            ds.setJdbcUrl(entry.getValue());
-            ds.setUsername("postgres");
-            ds.setPassword("09125689");
-            ds.setDriverClassName("org.postgresql.Driver");
-            ds.setMaximumPoolSize(5);
-            ds.setMinimumIdle(1);
+        // Використовуємо чистий JDBC для отримання конфігурації
+        try (Connection conn = DriverManager.getConnection(CATALOG_URL, DB_USER, DB_PASS);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT shard_key, jdbc_url FROM shard_mapping")) {
 
-            targetDataSources.put(entry.getKey(), ds);
+            while (rs.next()) {
+                String key = rs.getString("shard_key");
+                String url = rs.getString("jdbc_url");
+
+                HikariDataSource ds = new HikariDataSource();
+                ds.setJdbcUrl(url);
+                ds.setUsername(DB_USER);
+                ds.setPassword(DB_PASS);
+                ds.setDriverClassName("org.postgresql.Driver");
+                ds.setMaximumPoolSize(5);
+                ds.setMinimumIdle(1);
+
+                targetDataSources.put(key, ds);
+            }
+            System.out.println("Loaded " + targetDataSources.size() + " shards from DB.");
+
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to load shard mapping from DB", e);
         }
 
         this.setTargetDataSources(targetDataSources);
-        this.afterPropertiesSet(); // Важливо! Це змушує Spring застосувати зміни
-        System.out.println("✅ DataSources reloaded successfully.");
+
+        // Встановлюємо дефолтний
+        if (!targetDataSources.isEmpty()) {
+            this.setDefaultTargetDataSource(targetDataSources.values().iterator().next());
+        }
+
+        this.afterPropertiesSet();
     }
 }

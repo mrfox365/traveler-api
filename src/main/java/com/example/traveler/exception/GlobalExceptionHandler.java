@@ -34,11 +34,13 @@ public class GlobalExceptionHandler {
 
         try {
             shardingDataSource.refreshDataSources();
+
             // Повертаємо 503, щоб клієнт спробував ще раз
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .header("Retry-After", "1")
                     .body(Map.of("error", "Sharding map refreshed. Please try again."));
-        } catch (IOException e) {
+
+        } catch (Exception e) {
             log.error("Failed to refresh mapping", e);
             return ResponseEntity.internalServerError().body(Map.of("error", "Critical system error during rebalancing"));
         }
