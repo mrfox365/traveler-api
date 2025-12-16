@@ -4,40 +4,48 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.sharding.db
+    hostname: postgres_00
     environment:
       POSTGRES_PASSWORD: "09125689"
     ports:
       - "5432:5432"
+    command: ["postgres", "-c", "wal_level=logical"]
 
   # === Shard Node 1 (db_4 ... db_7) ===
   postgres_01:
     build:
       context: .
       dockerfile: Dockerfile.sharding.db
+    hostname: postgres_01
     environment:
       POSTGRES_PASSWORD: "09125689"
     ports:
       - "5433:5432"
+    command: ["postgres", "-c", "wal_level=logical"]
 
   # === Shard Node 2 (db_8 ... db_b) ===
   postgres_02:
     build:
       context: .
       dockerfile: Dockerfile.sharding.db
+    hostname: postgres_02
     environment:
       POSTGRES_PASSWORD: "09125689"
     ports:
       - "5434:5432"
+    command: ["postgres", "-c", "wal_level=logical"]
 
   # === Shard Node 3 (db_c ... db_f) ===
   postgres_03:
     build:
       context: .
       dockerfile: Dockerfile.sharding.db
+    hostname: postgres_03
     environment:
       POSTGRES_PASSWORD: "09125689"
     ports:
       - "5435:5432"
+    command: ["postgres", "-c", "wal_level=logical"]
 
   # === AUTOMATIC SCHEMA INITIALIZER ===
   schema-init:
@@ -61,6 +69,8 @@ services:
       # Вимикаємо DDL-auto, бо Hibernate не вміє створювати таблиці на 16 базах одночасно
       SPRING_JPA_HIBERNATE_DDL_AUTO: none
       SPRING_JPA_SHOW_SQL: "true"
+    volumes:
+      - shared_config:/config
     depends_on:
       postgres_00:
         condition: service_started
@@ -72,3 +82,6 @@ services:
         condition: service_started
       schema-init:
         condition: service_completed_successfully
+
+volumes:
+  shared_config:

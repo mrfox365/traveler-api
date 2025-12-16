@@ -1,37 +1,47 @@
-# Масив конфігурації: Контейнер -> Бази даних в ньому
-$shardMap = @{
-    "postgres_00" = @("db_0", "db_1", "db_2", "db_3")
-    "postgres_01" = @("db_4", "db_5", "db_6", "db_7")
-    "postgres_02" = @("db_8", "db_9", "db_a", "db_b")
-    "postgres_03" = @("db_c", "db_d", "db_e", "db_f")
-}
+# Налаштовуємо консоль на UTF-8 (про всяк випадок)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$totalCount = 0
+# Список контейнерів і баз
+$containers = @("postgres_00", "postgres_01", "postgres_02", "postgres_03")
+$databases = @()
+0..9 | ForEach-Object { $databases += "db_$_" }
+"a","b","c","d","e","f" | ForEach-Object { $databases += "db_$_" }
 
-Write-Host "Checking data distribution..." -ForegroundColor Cyan
+$grandTotal = 0
 
-foreach ($container in $shardMap.Keys) {
-    Write-Host "--- Container: $container ---" -ForegroundColor Yellow
-    foreach ($db in $shardMap[$container]) {
-        # Отримуємо "сирий" вивід від докера
-        $rawOutput = docker-compose exec -T $container psql -U postgres -d $db -t -c "SELECT count(*) FROM travel_plans;" 2>$null
+Write-Host "Scanning cluster for distributed data..." -ForegroundColor Cyan
+Write-Host "-----------------------------------------------------------------------"
+Write-Host ("{0,-10} | {1,-15} | {2,-10} | {3,-10}" -f "DATABASE", "CONTAINER", "ROWS", "SIZE")
+Write-Host "-----------------------------------------------------------------------"
 
-        # Фільтруємо сміття: беремо тільки рядок, що містить цифри
-        $count = $rawOutput | Where-Object { $_ -match '^\s*\d+\s*$' } | Select-Object -First 1
+foreach ($db in $databases) {
+    foreach ($container in $containers) {
+        # SQL запит
+        $sql = "SELECT count(*) || '|' || pg_size_pretty(pg_database_size('$db')) FROM travel_plans;"
 
-        # Якщо нічого не знайшли, вважаємо що 0
-        if ($null -eq $count -or $count -eq "") {
-            $count = "0"
+        # Виконуємо команду
+        $rawOutput = docker-compose exec -T $container psql -U postgres -d $db -t -A -q -c $sql 2>&1
+
+        # Перетворюємо в рядок безпечно
+        if ($null -eq $rawOutput) { $cleanOutput = "" }
+        else { $cleanOutput = $rawOutput.ToString().Trim() }
+
+        # Логіка визначення результату
+        if ($cleanOutput -match '^(\d+)\|(.+)$') {
+            # Варіант 1: Дані знайдено
+            $rows = $Matches[1]
+            $size = $Matches[2]
+
+            if ([int]$rows -gt 0) {
+                $grandTotal += [int]$rows
+                Write-Host ("{0,-10} | {1,-15} | {2,-10} | {3,-10}" -f $db, $container, $rows, $size) -ForegroundColor Green
+            }
         }
-
-        # Прибираємо пробіли
-        $count = $count.ToString().Trim()
-
-        Write-Host "  Database $db : $count rows"
-
-        # Тепер конвертація пройде успішно
-        $totalCount += [int]$count
+        elseif ($cleanOutput -match "does not exist") {
+            # Варіант 2: Таблиці немає - ігноруємо
+        }
     }
 }
 
-Write-Host "`nTotal records created: $totalCount" -ForegroundColor Green
+Write-Host "-----------------------------------------------------------------------"
+Write-Host "TOTAL RECORDS CLUSTER-WIDE: $grandTotal" -ForegroundColor Cyan

@@ -1,3 +1,11 @@
 FROM postgres:15-alpine
 
-COPY db/init-shards.sql /docker-entrypoint-initdb.d/init.sql
+# Встановлюємо утиліту для виправлення закінчення рядків (Windows fix)
+RUN apk add --no-cache dos2unix
+
+# Копіюємо скрипт
+COPY db/init-shards.sh /docker-entrypoint-initdb.d/init-shards.sh
+
+# Виправляємо права і Windows-символи
+RUN dos2unix /docker-entrypoint-initdb.d/init-shards.sh && \
+    chmod +x /docker-entrypoint-initdb.d/init-shards.sh

@@ -30,7 +30,7 @@ PASS = "09125689"
 
 def apply_script(file_path):
     if not os.path.exists(file_path):
-        print(f"❌ File not found: {file_path}")
+        print(f"File not found: {file_path}")
         return
 
     with open(file_path, 'r') as f:
@@ -39,7 +39,7 @@ def apply_script(file_path):
     connections = []
     cursors = []
 
-    print(f"🚀 Starting distributed transaction on 16 shards...")
+    print(f"Starting distributed transaction on 16 shards...")
 
     try:
         # 1. Відкриваємо з'єднання до ВСІХ баз (Phase 1)
@@ -59,7 +59,7 @@ def apply_script(file_path):
                 cur.execute(sql) # Виконуємо, але НЕ комітимо
 
         # 2. Якщо ми тут - помилок не було. Комітимо ВСЮДИ (Phase 2)
-        print("✅ All shards executed successfully. Committing...")
+        print("All shards executed successfully. Committing...")
         for conn in connections:
             conn.commit()
             conn.close()
@@ -67,8 +67,8 @@ def apply_script(file_path):
         print("🎉 DONE. Script applied to all shards.")
 
     except Exception as e:
-        print(f"\n❌ ERROR detected: {e}")
-        print("⚠️ Rolling back ALL transactions...")
+        print(f"\nERROR detected: {e}")
+        print("⚠Rolling back ALL transactions...")
 
         # 3. Відкат (Rollback)
         for conn in connections:
@@ -77,7 +77,7 @@ def apply_script(file_path):
                 conn.close()
             except:
                 pass
-        print("💀 System state restored (nothing changed).")
+        print("System state restored (nothing changed).")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -21,9 +21,6 @@ RUN mvn clean package -DskipTests
 # Використовуємо легкий образ JRE 17 для запуску готового додатку
 FROM eclipse-temurin:17-jre-alpine
 
-# Копіюємо mapping.json поки ми ще root, щоб створити папку /config без помилок
-COPY sharding-config/mapping.json /config/mapping.json
-
 # Створюємо користувача для безпеки (щоб не запускати під root)
 RUN addgroup -S spring && adduser -S spring -G spring
 USER spring:spring
