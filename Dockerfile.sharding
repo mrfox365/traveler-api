@@ -1,0 +1,10 @@
+FROM postgres:15-alpine
+RUN apk add --no-cache dos2unix
+
+# Копіюємо скрипт всередину
+COPY init-schema.sh /usr/local/bin/init-shards.sh
+
+RUN dos2unix /usr/local/bin/init-shards.sh && \
+    chmod +x /usr/local/bin/init-shards.sh
+
+ENTRYPOINT ["init-shards.sh"]

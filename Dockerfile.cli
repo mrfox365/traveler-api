@@ -1,0 +1,15 @@
+FROM python:3.9-slim
+
+RUN pip install psycopg2-binary
+
+WORKDIR /app
+
+# Копіюємо скрипт
+COPY shard-cli.py .
+
+# Створюємо папку для скриптів
+RUN mkdir /files
+# Копіюємо всі .sql файли з поточної папки хоста в /files контейнера
+COPY *.sql /files/
+
+ENTRYPOINT ["python", "shard-cli.py"]

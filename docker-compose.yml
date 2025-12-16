@@ -1,51 +1,50 @@
 services:
   # === Shard Node 0 (db_0 ... db_3) ===
   postgres_00:
-    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.sharding.db
     environment:
       POSTGRES_PASSWORD: "09125689"
     ports:
       - "5432:5432"
-    volumes:
-      - ./db/init-shards.sql:/docker-entrypoint-initdb.d/init.sql
 
   # === Shard Node 1 (db_4 ... db_7) ===
   postgres_01:
-    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.sharding.db
     environment:
       POSTGRES_PASSWORD: "09125689"
     ports:
       - "5433:5432"
-    volumes:
-      - ./db/init-shards.sql:/docker-entrypoint-initdb.d/init.sql
 
   # === Shard Node 2 (db_8 ... db_b) ===
   postgres_02:
-    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.sharding.db
     environment:
       POSTGRES_PASSWORD: "09125689"
     ports:
       - "5434:5432"
-    volumes:
-      - ./db/init-shards.sql:/docker-entrypoint-initdb.d/init.sql
 
   # === Shard Node 3 (db_c ... db_f) ===
   postgres_03:
-    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.sharding.db
     environment:
       POSTGRES_PASSWORD: "09125689"
     ports:
       - "5435:5432"
-    volumes:
-      - ./db/init-shards.sql:/docker-entrypoint-initdb.d/init.sql
 
   # === AUTOMATIC SCHEMA INITIALIZER ===
   schema-init:
-    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.sharding
     container_name: traveler-schema-init
-    volumes:
-      - ./init-schema.sh:/init-schema.sh
-    entrypoint: ["/bin/sh", "/init-schema.sh"]
     depends_on:
       - postgres_00
       - postgres_01
@@ -62,9 +61,6 @@ services:
       # Вимикаємо DDL-auto, бо Hibernate не вміє створювати таблиці на 16 базах одночасно
       SPRING_JPA_HIBERNATE_DDL_AUTO: none
       SPRING_JPA_SHOW_SQL: "true"
-    volumes:
-      # Монтуємо файл конфігурації мапінгу
-      - ./sharding-config:/config
     depends_on:
       postgres_00:
         condition: service_started
