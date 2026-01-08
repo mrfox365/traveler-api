@@ -1,5 +1,7 @@
 package com.example.traveler.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.NotNull;
@@ -22,17 +24,21 @@ public record UpdateLocationRequest(
         @DecimalMax(value = "180.0")
         BigDecimal longitude,
 
-        OffsetDateTime arrivalDate,
-        OffsetDateTime departureDate,
+        @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSX")
+        @JsonProperty("arrivalDate") OffsetDateTime arrivalDate,
+
+        @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSX")
+        @JsonProperty("departureDate") OffsetDateTime departureDate,
 
         @DecimalMin("0.0")
-        @Digits(integer = 8, fraction = 2, message = "Budget must have up to 8 integer digits and 2 fraction digits")
+        @Digits(integer = 8, fraction = 2)
         BigDecimal budget,
 
         String notes,
-        Integer visitOrder,
+
+        @JsonProperty("visitOrder") Integer visitOrder,
 
         @NotNull
-        @Min(value = 0, message = "Version cannot be negative")
+        @Min(value = 0)
         Integer version
 ) {}

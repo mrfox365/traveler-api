@@ -33,39 +33,22 @@ public class TravelPlanService {
     private final TravelPlanRepository planRepository;
     private final TransactionTemplate transactionTemplate;
 
-    // Всі можливі ключі шардів
     private static final String[] SHARDS = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"};
-
-    // Пул потоків для паралельних запитів до 16 баз
     private final ExecutorService executorService = Executors.newFixedThreadPool(16);
 
-    /**
-     * Реалізація getAllPlans для шардованої архітектури.
-     */
     public Page<PlanSummaryResponse> getAllPlans(Pageable pageable) {
-        // 1. Отримуємо загальну кількість записів (Count) з усіх шардів паралельно
         long totalElements = getTotalCountFromAllShards();
 
         if (totalElements == 0) {
             return new PageImpl<>(Collections.emptyList(), pageable, 0);
         }
 
-        // 2. Отримуємо дані з усіх шардів паралельно.
-        // Нюанс: Ми не знаємо, як розподілені дані. Тому ми повинні отримати (offset + limit) записів
-        // з КОЖНОГО шарду, потім об'єднати їх, відсортувати і взяти потрібний шматок.
-        // Це "дорога" операція для глибокої пагінації (deep paging), але коректна.
-
         int neededSize = (int) pageable.getOffset() + pageable.getPageSize();
-        // Запитуємо трохи більше даних з кожного шарду (0...neededSize), щоб гарантувати правильний порядок
         Pageable internalPageable = PageRequest.of(0, neededSize, pageable.getSort());
 
         List<TravelPlan> aggregatedResults = getDataFromAllShards(internalPageable);
-
-        // 3. Сортування в пам'яті (Memory Sort)
-        // Оскільки ми злили дані з 16 джерел, їхній глобальний порядок порушено.
         sortInMemory(aggregatedResults, pageable);
 
-        // 4. Пагінація в пам'яті (Memory Slice)
         int start = (int) pageable.getOffset();
         int end = Math.min((start + pageable.getPageSize()), aggregatedResults.size());
 
@@ -83,14 +66,10 @@ public class TravelPlanService {
 
     private long getTotalCountFromAllShards() {
         List<CompletableFuture<Long>> futures = new ArrayList<>();
-
         for (String shard : SHARDS) {
-            // Запускаємо асинхронну задачу
             CompletableFuture<Long> future = CompletableFuture.supplyAsync(() -> {
-                // Встановлюємо контекст для ЦЬОГО потоку
                 ShardContext.setShard(shard);
                 try {
-                    // Виконуємо count
                     return planRepository.count();
                 } finally {
                     ShardContext.clear();
@@ -98,21 +77,15 @@ public class TravelPlanService {
             }, executorService);
             futures.add(future);
         }
-
-        // Чекаємо завершення всіх і сумуємо
-        return futures.stream()
-                .map(CompletableFuture::join)
-                .reduce(0L, Long::sum);
+        return futures.stream().map(CompletableFuture::join).reduce(0L, Long::sum);
     }
 
     private List<TravelPlan> getDataFromAllShards(Pageable pageable) {
         List<CompletableFuture<List<TravelPlan>>> futures = new ArrayList<>();
-
         for (String shard : SHARDS) {
             CompletableFuture<List<TravelPlan>> future = CompletableFuture.supplyAsync(() -> {
                 ShardContext.setShard(shard);
                 try {
-                    // Отримуємо "топ N" записів з цього шарду
                     return planRepository.findAll(pageable).getContent();
                 } finally {
                     ShardContext.clear();
@@ -120,84 +93,36 @@ public class TravelPlanService {
             }, executorService);
             futures.add(future);
         }
-
-        // Об'єднуємо всі списки в один великий список
         return futures.stream()
                 .map(CompletableFuture::join)
                 .flatMap(List::stream)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Виконує сортування списку в пам'яті на основі параметрів Pageable.
-     * Підтримує сортування за кількома полями та напрямками (ASC/DESC).
-     */
     private void sortInMemory(List<TravelPlan> plans, Pageable pageable) {
-        if (pageable.getSort().isUnsorted()) {
-            return; // Сортування не потрібне
-        }
+        if (pageable.getSort().isUnsorted()) return;
 
         Comparator<TravelPlan> comparator = null;
-
-        // Проходимо по всіх полях сортування (наприклад: order by startDate DESC, title ASC)
         for (org.springframework.data.domain.Sort.Order order : pageable.getSort()) {
             Comparator<TravelPlan> currentComparator = getComparatorForProperty(order.getProperty());
-
-            if (currentComparator == null) {
-                continue; // Ігноруємо невідомі поля
-            }
-
-            // Враховуємо напрямок (DESC/ASC)
-            if (order.isDescending()) {
-                currentComparator = currentComparator.reversed();
-            }
-
-            // Додаємо до ланцюжка компараторів
-            if (comparator == null) {
-                comparator = currentComparator;
-            } else {
-                comparator = comparator.thenComparing(currentComparator);
-            }
+            if (currentComparator == null) continue;
+            if (order.isDescending()) currentComparator = currentComparator.reversed();
+            if (comparator == null) comparator = currentComparator;
+            else comparator = comparator.thenComparing(currentComparator);
         }
-
-        // Застосовуємо сортування
-        if (comparator != null) {
-            plans.sort(comparator);
-        }
+        if (comparator != null) plans.sort(comparator);
     }
 
-    /**
-     * Мапить назву поля (string) на Comparator для об'єкта TravelPlan.
-     * Тут ми визначаємо, за якими полями дозволено сортувати.
-     */
     private Comparator<TravelPlan> getComparatorForProperty(String property) {
         switch (property) {
-            case "title":
-                // Сортування рядків ігноруючи регістр, null значення йдуть в кінець
-                return Comparator.comparing(TravelPlan::getTitle, Comparator.nullsLast(String::compareToIgnoreCase));
-
-            case "startDate":
-                return Comparator.comparing(TravelPlan::getStartDate, Comparator.nullsLast(Comparator.naturalOrder()));
-
-            case "endDate":
-                return Comparator.comparing(TravelPlan::getEndDate, Comparator.nullsLast(Comparator.naturalOrder()));
-
-            case "budget":
-                return Comparator.comparing(TravelPlan::getBudget, Comparator.nullsLast(Comparator.naturalOrder()));
-
-            case "currency":
-                return Comparator.comparing(TravelPlan::getCurrency, Comparator.nullsLast(String::compareToIgnoreCase));
-
-            case "id":
-                return Comparator.comparing(TravelPlan::getId, Comparator.nullsLast(Comparator.naturalOrder()));
-
-            case "created_at":
-                return Comparator.comparing(TravelPlan::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()));
-
-            default:
-                // Логуємо або ігноруємо, якщо клієнт просить сортувати за полем, якого немає
-                // log.warn("Unknown sort property: {}", property);
-                return null;
+            case "title": return Comparator.comparing(TravelPlan::getTitle, Comparator.nullsLast(String::compareToIgnoreCase));
+            case "startDate": return Comparator.comparing(TravelPlan::getStartDate, Comparator.nullsLast(Comparator.naturalOrder()));
+            case "endDate": return Comparator.comparing(TravelPlan::getEndDate, Comparator.nullsLast(Comparator.naturalOrder()));
+            case "budget": return Comparator.comparing(TravelPlan::getBudget, Comparator.nullsLast(Comparator.naturalOrder()));
+            case "currency": return Comparator.comparing(TravelPlan::getCurrency, Comparator.nullsLast(String::compareToIgnoreCase));
+            case "id": return Comparator.comparing(TravelPlan::getId, Comparator.nullsLast(Comparator.naturalOrder()));
+            case "createdAt": return Comparator.comparing(TravelPlan::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()));
+            default: return null;
         }
     }
 
@@ -231,10 +156,8 @@ public class TravelPlanService {
                 plan.setStartDate(request.startDate());
                 plan.setEndDate(request.endDate());
                 plan.setBudget(request.budget());
-                if (request.currency() != null) {
-                    plan.setCurrency(request.currency());
-                }
-                plan.setPublic(request.isPublic());
+                if (request.currency() != null) plan.setCurrency(request.currency());
+                plan.setPublic(request.isPublic()); // Тепер це працюватиме коректно
                 TravelPlan savedPlan = planRepository.save(plan);
                 return toPlanResponse(savedPlan);
             });
@@ -262,6 +185,7 @@ public class TravelPlanService {
                 plan.setEndDate(request.endDate());
                 plan.setBudget(request.budget());
                 plan.setCurrency(request.currency());
+                plan.setPublic(request.isPublic()); // Додано оновлення статусу Public/Private
                 TravelPlan updatedPlan = planRepository.saveAndFlush(plan);
                 return toPlanResponse(updatedPlan);
             });
@@ -286,8 +210,6 @@ public class TravelPlanService {
         }
     }
 
-    // === Helper Methods ===
-
     private String getShardKey(UUID id) {
         String uuidStr = id.toString();
         return String.valueOf(uuidStr.charAt(uuidStr.length() - 1));
@@ -304,6 +226,8 @@ public class TravelPlanService {
                         loc.getLongitude(),
                         loc.getVisitOrder(),
                         loc.getNotes(),
+                        loc.getArrivalDate(),
+                        loc.getDepartureDate(),
                         loc.getBudget(),
                         loc.getVersion()))
                 .collect(Collectors.toList());
@@ -314,12 +238,16 @@ public class TravelPlanService {
                 plan.getVersion(), plan.isPublic(), locationDtos);
     }
 
+    // Оновлений метод з новими полями
     private PlanSummaryResponse toPlanSummaryResponse(TravelPlan plan) {
         return new PlanSummaryResponse(
                 plan.getId(),
                 plan.getTitle(),
                 plan.getStartDate(),
                 plan.getEndDate(),
+                plan.getBudget(),
+                plan.getCurrency(),
+                plan.isPublic(),
                 plan.getVersion()
         );
     }

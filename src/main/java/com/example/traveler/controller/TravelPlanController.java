@@ -14,7 +14,8 @@ import com.example.traveler.service.TravelPlanService;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/travel-plans") // Базовий шлях [cite: 46]
+@RequestMapping("/api/travel-plans")
+@CrossOrigin(origins = "*")
 @RequiredArgsConstructor
 public class TravelPlanController {
 

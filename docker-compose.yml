@@ -1,5 +1,7 @@
 services:
-  # === Shard Node 0 (db_0 ... db_3) ===
+  # ==========================================
+  # DATABASE CLUSTER (4 Nodes, 16 Shards)
+  # ==========================================
   postgres_00:
     build:
       context: .
@@ -11,7 +13,6 @@ services:
       - "5432:5432"
     command: ["postgres", "-c", "wal_level=logical"]
 
-  # === Shard Node 1 (db_4 ... db_7) ===
   postgres_01:
     build:
       context: .
@@ -23,7 +24,6 @@ services:
       - "5433:5432"
     command: ["postgres", "-c", "wal_level=logical"]
 
-  # === Shard Node 2 (db_8 ... db_b) ===
   postgres_02:
     build:
       context: .
@@ -35,7 +35,6 @@ services:
       - "5434:5432"
     command: ["postgres", "-c", "wal_level=logical"]
 
-  # === Shard Node 3 (db_c ... db_f) ===
   postgres_03:
     build:
       context: .
@@ -47,7 +46,11 @@ services:
       - "5435:5432"
     command: ["postgres", "-c", "wal_level=logical"]
 
-  # === AUTOMATIC SCHEMA INITIALIZER ===
+  # ==========================================
+  # UTILITIES
+  # ==========================================
+
+  # Створює таблиці travel_plans/locations у всіх базах
   schema-init:
     build:
       context: .
@@ -58,15 +61,15 @@ services:
       - postgres_01
       - postgres_02
       - postgres_03
-    networks:
-      - default
 
+  # ==========================================
+  # BACKEND API (Spring Boot)
+  # ==========================================
   app:
     build: .
     ports:
       - "8080:8080"
     environment:
-      # Вимикаємо DDL-auto, бо Hibernate не вміє створювати таблиці на 16 базах одночасно
       SPRING_JPA_HIBERNATE_DDL_AUTO: none
       SPRING_JPA_SHOW_SQL: "true"
     volumes:
@@ -74,14 +77,42 @@ services:
     depends_on:
       postgres_00:
         condition: service_started
-      postgres_01:
-        condition: service_started
-      postgres_02:
-        condition: service_started
-      postgres_03:
-        condition: service_started
       schema-init:
         condition: service_completed_successfully
+
+  # ==========================================
+  # FRONTEND (React) - User GUI
+  # ==========================================
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - app
+
+  # ==========================================
+  # ADMIN DASHBOARD (Streamlit) - Shard Manager
+  # ==========================================
+  admin-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.cli
+    container_name: shard-admin
+    command: ["-m", "streamlit", "run", "admin_dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app # Монтуємо код, щоб бачити admin_dashboard.py та rebalance.py
+      - shared_config:/config
+    environment:
+      - AM_I_IN_DOCKER=true
+    depends_on:
+      - postgres_00
 
 volumes:
   shared_config:

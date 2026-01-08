@@ -131,7 +131,7 @@ public class LocationService {
         return new LocationDTO(
                 loc.getId(), loc.getTravelPlan().getId(), loc.getName(), loc.getAddress(),
                 loc.getLatitude(), loc.getLongitude(), loc.getVisitOrder(), loc.getNotes(),
-                loc.getBudget(), loc.getVersion());
+                loc.getArrivalDate(), loc.getDepartureDate(), loc.getBudget(), loc.getVersion());
     }
 
     private String getShardKey(UUID id) {

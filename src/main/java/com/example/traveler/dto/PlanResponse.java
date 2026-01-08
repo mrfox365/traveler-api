@@ -1,5 +1,6 @@
 package com.example.traveler.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -9,12 +10,15 @@ public record PlanResponse(
         UUID id,
         String title,
         String description,
-        LocalDate startDate,
-        LocalDate endDate,
+
+        @JsonProperty("startDate") LocalDate startDate,
+        @JsonProperty("endDate") LocalDate endDate,
+
         BigDecimal budget,
         String currency,
         Integer version,
 
-        boolean isPublic,
+        @JsonProperty("isPublic") boolean isPublic,
+
         List<LocationDTO> locations
 ) {}
